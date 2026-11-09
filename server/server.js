@@ -243,6 +243,8 @@ route('POST', '/api/auth/register', async (req) => {
   if (!password || String(password).length < 8) throw httpError(400, 'Mot de passe : 8 caractères minimum');
   const first = db.prepare('SELECT COUNT(*) AS n FROM users').get().n === 0;
   const mode = getSettings().registration;
+  const local = !req.headers['cf-connecting-ip'] && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+  if (first && !local) throw httpError(403, 'Le compte admin doit être créé depuis le PC : ouvre http://localhost:7575');
   if (!first && mode === 'closed') throw httpError(403, 'Les inscriptions sont fermées');
   if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(name)) throw httpError(409, 'Ce nom est déjà pris');
   const role = first ? 'admin' : 'user';
