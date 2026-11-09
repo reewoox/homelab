@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Homelab</title>
+  <meta name="theme-color" content="#141517">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="bg"></div>
+
+  <!-- Chargement -->
+  <section id="view-loading" class="view center">
+    <div class="spinner"></div>
+    <p class="muted">Connexion à ton PC…</p>
+  </section>
+
+  <!-- Serveur hors ligne -->
+  <section id="view-offline" class="view center" hidden>
+    <div class="card auth-card">
+      <div class="brand big"><img src="icon.svg" alt=""><span>Homelab</span></div>
+      <h2>Serveur injoignable</h2>
+      <p class="muted">Ton PC est peut-être éteint, ou le tunnel vient de redémarrer (l’adresse se met à jour en ~1 minute).</p>
+      <button class="btn primary w100" id="retry">Réessayer</button>
+      <details class="advanced">
+        <summary>Adresse de l’API manuelle</summary>
+        <form id="api-form" class="stack">
+          <input id="api-input" placeholder="https://xxxx.trycloudflare.com" autocomplete="off">
+          <div class="row">
+            <button class="btn" type="submit">Utiliser</button>
+            <button class="btn ghost" type="button" id="api-reset">Par défaut</button>
+          </div>
+        </form>
+      </details>
+    </div>
+  </section>
+
+  <!-- Connexion / inscription -->
+  <section id="view-auth" class="view center" hidden>
+    <div class="card auth-card">
+      <div class="brand big"><img src="icon.svg" alt=""><span id="auth-title">Homelab</span></div>
+      <div class="tabs" id="auth-tabs">
+        <button data-tab="login" class="active">Connexion</button>
+        <button data-tab="register">Inscription</button>
+      </div>
+      <p id="first-run" class="note" hidden>👋 Premier lancement : crée ton compte <b>administrateur</b>.</p>
+      <form id="auth-form" class="stack">
+        <label>Nom d’utilisateur<input name="username" autocomplete="username" required minlength="3" maxlength="32"></label>
+        <label data-only="register">Email <span class="muted">(optionnel)</span><input name="email" type="email" autocomplete="email"></label>
+        <label>Mot de passe<input name="password" type="password" autocomplete="current-password" required minlength="8"></label>
+        <label data-only="register">Confirmer le mot de passe<input name="confirm" type="password" autocomplete="new-password" minlength="8"></label>
+        <p class="error" id="auth-error" hidden></p>
+        <p class="success" id="auth-success" hidden></p>
+        <button class="btn primary w100" type="submit" id="auth-submit">Se connecter</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Tableau de bord -->
+  <section id="view-app" class="view" hidden>
+    <header class="topbar">
+      <div class="brand"><img src="icon.svg" alt=""><span id="title">Homelab</span></div>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="search" placeholder="Rechercher une app ou sur le web…  ( / )" autocomplete="off">
+      </div>
+      <div class="actions">
+        <button class="icon-btn admin-only" id="toggle-edit" title="Mode édition">
+          <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/></svg>
+        </button>
+        <button class="icon-btn admin-only" id="open-settings" title="Réglages">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
+        <div class="menu-wrap">
+          <button class="avatar" id="avatar" title="Mon compte"></button>
+          <div class="menu" id="user-menu" hidden>
+            <div class="menu-head"><b id="menu-name"></b><span class="muted" id="menu-role"></span></div>
+            <button id="menu-password">Changer de mot de passe</button>
+            <button id="menu-logout" class="danger-text">Se déconnecter</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="edit-banner" id="edit-banner" hidden>
+      <span>✏️ Mode édition — glisse les apps pour les ranger, clique pour les modifier.</span>
+      <div class="row">
+        <button class="btn" id="add-category">+ Catégorie</button>
+        <button class="btn primary" id="add-app">+ Application</button>
+        <button class="btn ghost" id="exit-edit">Terminer</button>
+      </div>
+    </div>
+
+    <main class="container">
+      <section class="widgets">
+        <div class="card widget clock">
+          <div class="greet" id="greet"></div>
+          <div class="time" id="clock"></div>
+          <div class="muted" id="date"></div>
+        </div>
+        <div class="card widget weather" id="weather">
+          <div class="muted">Météo…</div>
+        </div>
+        <div class="card widget system" id="system">
+          <div class="muted">Système…</div>
+        </div>
+      </section>
+      <div id="board"></div>
+      <p class="empty muted" id="no-results" hidden>Aucune app ne correspond. Appuie sur <kbd>Entrée</kbd> pour chercher sur le web.</p>
+    </main>
+  </section>
+
+  <!-- Fenêtre modale générique -->
+  <dialog id="modal">
+    <form method="dialog" class="modal-inner" id="modal-form">
+      <header><h3 id="modal-title"></h3><button class="icon-btn" value="cancel" formnovalidate>✕</button></header>
+      <div id="modal-body"></div>
+      <p class="error" id="modal-error" hidden></p>
+      <footer id="modal-footer"></footer>
+    </form>
+  </dialog>
+
+  <div id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>
