@@ -9,7 +9,33 @@ const store = {
   set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
 };
 
-const state = { api: '', token: store.get('hl_token'), user: null, board: null, status: {}, editing: false, health: null };
+const state = { api: '', token: store.get('hl_token'), user: null, board: null, status: {}, editing: false, health: null, page: 'home', remote: null };
+
+// Accès « direct » : depuis le PC, le réseau local ou Tailscale → on peut ouvrir les adresses locales/Tailscale
+const isLocalAccess = () => /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+const absUrl = (u) => (/^https?:/.test(u) ? u : (state.api || location.origin) + u);
+const fmtSize = (n) => {
+  if (n == null) return '';
+  const u = ['o', 'Ko', 'Mo', 'Go', 'To']; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+};
+const timeAgo = (ts) => {
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60) return 'à l’instant';
+  if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
+  return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+};
+const deviceName = () => {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? 'Android' : 'Tablette Android';
+  if (/Windows/.test(ua)) return 'PC Windows';
+  if (/Mac/.test(ua)) return 'Mac';
+  return 'Appareil';
+};
 
 // ---------- API ----------
 async function resolveApi() {
@@ -122,6 +148,8 @@ $('#auth-form').onsubmit = async (e) => {
 };
 
 function logout() {
+  pages[state.page]?.leave?.();
+  state.page = 'home';
   state.token = null; state.user = null; store.set('hl_token', null);
   stopTimers();
   setEditing(false);
@@ -143,9 +171,30 @@ async function enterApp() {
   tickClock();
   loadSystem();
   loadStatus();
+  loadDevices();
   stopTimers();
-  timers.push(setInterval(tickClock, 1000), setInterval(loadSystem, 5000), setInterval(loadStatus, 30000), setInterval(loadWeather, 30 * 60e3));
+  timers.push(setInterval(tickClock, 1000), setInterval(loadSystem, 5000), setInterval(loadStatus, 30000), setInterval(loadWeather, 30 * 60e3), setInterval(loadDevices, 60e3));
+  route();
 }
+
+// ---------- Navigation entre les pages ----------
+const PAGES = { home: 'Accueil', drive: 'Drive', clip: 'Presse-papiers', ai: 'Assistant IA', monitor: 'Moniteur' };
+const pages = {}; // remplis par pages/*.js : { enter(el), leave() }
+function route() {
+  if (!state.user) return;
+  const name = (location.hash.match(/^#\/(\w+)/) || [])[1] || 'home';
+  const page = PAGES[name] ? name : 'home';
+  if (state.page !== page) pages[state.page]?.leave?.();
+  state.page = page;
+  $$('.page').forEach((p) => (p.hidden = p.id !== `page-${page}`));
+  $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
+  $('#page-title').textContent = PAGES[page];
+  $('#view-app').dataset.page = page;
+  if (page !== 'home' && state.editing) setEditing(false);
+  if (page !== 'home') pages[page]?.enter?.($(`#page-${page}`));
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', route);
 
 async function loadBoard() {
   try {
@@ -162,6 +211,7 @@ async function loadBoard() {
 function applySettings(s) {
   document.title = s.title;
   $('#title').textContent = s.title;
+  $('#title-m').textContent = s.title;
   if (s.accent) document.documentElement.style.setProperty('--accent', s.accent);
   const bg = $('#bg');
   if (s.background) { bg.style.backgroundImage = `url("${encodeURI(s.background)}")`; bg.classList.add('has-image'); }
@@ -229,15 +279,26 @@ function renderBoard() {
 function tileHtml(a) {
   const st = state.status[a.id];
   const dot = a.ping ? `<span class="dot ${st ? (st.up ? 'up' : 'down') : ''}" title="${st ? (st.up ? `En ligne · ${st.ms} ms` : `Hors ligne · ${esc(st.error || st.code)}`) : 'Vérification…'}"></span>` : '';
+  const href = appHref(a);
   const attrs = state.editing
     ? `role="button" tabindex="0" draggable="true"`
-    : `href="${esc(a.url)}" ${a.new_tab ? 'target="_blank" rel="noopener noreferrer"' : ''}`;
+    : `href="${esc(href)}" ${a.new_tab ? 'target="_blank" rel="noopener noreferrer"' : ''}`;
+  const badge = a.remote_url ? '<span class="badge-remote" title="Accessible de partout via Tailscale">🌐</span>'
+    : a.remote ? '<span class="badge-remote" title="Activation Tailscale en cours…">⏳</span>'
+    : (!isLocalAccess() && isPrivate(a.url)) ? '<span class="badge-remote" title="Adresse locale : ne marche que chez toi. Active « Accessible de partout » dans l’édition de l’app.">🏠</span>' : '';
   return `<a class="card tile" data-app="${a.id}" ${attrs}>
-    ${dot}${a.admin_only ? '<span class="lock" title="Visible par les admins seulement">🔒</span>' : ''}
+    ${dot}${badge}${a.admin_only ? '<span class="lock" title="Visible par les admins seulement">🔒</span>' : ''}
     <div class="ico">${iconHtml(a.icon, a.name)}</div>
     <div class="name">${esc(a.name)}</div>
     ${a.description ? `<div class="desc">${esc(a.description)}</div>` : ''}
   </a>`;
+}
+
+const isPrivate = (u) => { try { return /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^.]+$)/.test(new URL(u).hostname); } catch { return false; } };
+// Hors de chez toi, une app locale s'ouvre via son adresse Tailscale
+function appHref(a) {
+  if (a.remote_url && (!isLocalAccess() || !/^(localhost|127\.)/.test(location.hostname))) return a.remote_url;
+  return a.url;
 }
 
 function paintStatus() {
@@ -326,6 +387,45 @@ $('#exit-edit').onclick = () => setEditing(false);
 $('#add-app').onclick = () => editApp(null);
 $('#add-category').onclick = () => editCategory(null);
 
+// Détection automatique des services qui tournent sur le PC
+$('#discover').onclick = async () => {
+  toast('Recherche des services sur le PC…');
+  let found;
+  try { found = await api('/api/discover'); } catch (e) { return toast(e.message, true); }
+  if (!found.length) return toast('Aucun nouveau service détecté (tout est déjà ajouté 👍)');
+  const cats = state.board.categories;
+  openModal({
+    title: `${found.length} service(s) détecté(s)`,
+    body: `<div class="stack">
+      <p class="muted" style="margin:0">Coche ceux à ajouter à ton tableau de bord.</p>
+      ${found.map((f, i) => `<label class="check found">
+        <input type="checkbox" name="pick" value="${i}" checked>
+        <span class="ico">${iconHtml(f.icon, f.name)}</span>
+        <span><input name="name-${i}" value="${esc(f.name)}" maxlength="60"><span class="hint">${esc(f.url)}${f.title && f.title !== f.name ? ` · « ${esc(f.title)} »` : ''}</span></span>
+      </label>`).join('')}
+      <label>Catégorie<select name="category">
+        <option value="new">➕ Nouvelle catégorie « Sur mon PC »</option>
+        ${cats.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+      </select></label>
+      <label class="check"><input type="checkbox" name="remote" checked> 🌐 Les rendre accessibles de partout (Tailscale)</label>
+    </div>`,
+    footer: `<button class="btn ghost" value="cancel" formnovalidate>Annuler</button><button class="btn primary" value="ok">Ajouter</button>`,
+    async onSubmit(fd) {
+      const picks = fd.getAll('pick').map(Number);
+      if (!picks.length) return;
+      let catId = fd.get('category');
+      if (catId === 'new') catId = (await api('/api/categories', { method: 'POST', body: { name: 'Sur mon PC' } })).id;
+      for (const i of picks) {
+        const f = found[i];
+        await api('/api/apps', { method: 'POST', body: { name: fd.get(`name-${i}`) || f.name, url: f.url, icon: f.icon, category_id: Number(catId), remote: fd.has('remote'), new_tab: true, ping: true } });
+      }
+      await loadBoard();
+      setTimeout(loadBoard, 7000);
+      toast(`${picks.length} app(s) ajoutée(s) 🎉`);
+    },
+  });
+};
+
 async function moveCategory(id, dir) {
   const ids = state.board.categories.map((c) => c.id);
   const i = ids.indexOf(id);
@@ -405,6 +505,9 @@ function editApp(app, catId) {
       <datalist id="icon-list">${POPULAR.map((p) => `<option value="${p}">`).join('')}</datalist>
       <label>Description <span class="hint">(optionnel)</span><input name="description" maxlength="200" value="${esc(app?.description)}" placeholder="Films & séries"></label>
       <label>URL de vérification <span class="hint">— optionnel, si différente (ex. adresse locale)</span><input name="ping_url" type="url" value="${esc(app?.ping_url)}" placeholder="http://localhost:8096"></label>
+      <label class="check remote-check"><input type="checkbox" name="remote" ${app?.remote ? 'checked' : ''}>
+        <span>🌐 <b>Accessible de partout</b> <span class="hint">— pour une app locale : crée une adresse HTTPS Tailscale, utilisable depuis ton iPhone, ta tablette… (appareils connectés à Tailscale)</span></span></label>
+      ${app?.remote_url ? `<p class="hint" style="margin:-6px 0 0 26px">Adresse : <a href="${esc(app.remote_url)}" target="_blank" rel="noopener">${esc(app.remote_url)}</a></p>` : ''}
       <div class="row" style="gap:18px">
         <label class="check"><input type="checkbox" name="new_tab" ${app?.new_tab === 0 ? '' : 'checked'}> Nouvel onglet</label>
         <label class="check"><input type="checkbox" name="ping" ${app?.ping === 0 ? '' : 'checked'}> Vérifier l’état</label>
@@ -428,12 +531,13 @@ function editApp(app, catId) {
       const body = {
         name: fd.get('name'), category_id: Number(fd.get('category_id')), url: fd.get('url'),
         icon: fd.get('icon'), description: fd.get('description'), ping_url: fd.get('ping_url'),
-        new_tab: fd.has('new_tab'), ping: fd.has('ping'), admin_only: fd.has('admin_only'),
+        new_tab: fd.has('new_tab'), ping: fd.has('ping'), admin_only: fd.has('admin_only'), remote: fd.has('remote'),
       };
       if (app) await api(`/api/apps/${app.id}`, { method: 'PUT', body });
       else await api('/api/apps', { method: 'POST', body });
       await loadBoard();
       setTimeout(loadStatus, 2500);
+      if (body.remote) setTimeout(loadBoard, 6000); // l'adresse Tailscale arrive quelques secondes après
       toast(app ? 'Modifications enregistrées' : `${body.name} ajoutée 🎉`);
     },
   });
@@ -457,6 +561,7 @@ async function openSettings() {
         <label>Couleur d’accent<input name="accent" type="color" value="${esc(s.accent || '#fa5252')}" style="height:40px;padding:4px"></label>
       </div>
       <label>Image de fond <span class="hint">(URL, optionnel)</span><input name="background" type="url" value="${esc(s.background)}" placeholder="https://images.unsplash.com/…"></label>
+      <label>Dossier du Drive sur le PC <span class="hint">(chaque utilisateur y a son sous-dossier + un dossier « Commun »)</span><input name="driveRoot" value="${esc(s.driveRoot)}"></label>
       <div class="grid2">
         <label>Ville pour la météo<input name="weatherCity" value="${esc(s.weatherCity)}"></label>
         <label>Inscriptions<select name="registration">
@@ -574,13 +679,33 @@ $('#search').addEventListener('keydown', (e) => {
   const tiles = $$('#board .tile[data-app]');
   if (tiles.length === 1 && !state.editing) {
     const a = findApp(tiles[0].dataset.app);
-    return window.open(a.url, a.new_tab ? '_blank' : '_self', 'noopener');
+    return window.open(appHref(a), a.new_tab ? '_blank' : '_self', 'noopener');
   }
   window.open(`https://www.google.com/search?q=${encodeURIComponent(q)}`, '_blank', 'noopener');
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === '/' && !e.target.closest('input, textarea, select') && !$('#view-app').hidden && !modal.open) { e.preventDefault(); $('#search').focus(); }
+  if (e.key === '/' && state.page === 'home' && !e.target.closest('input, textarea, select') && !$('#view-app').hidden && !modal.open) { e.preventDefault(); $('#search').focus(); }
 });
+
+// ---------- Widget « Mes appareils » (Tailscale) ----------
+const OS_ICON = { windows: '💻', macOS: '💻', linux: '🐧', iOS: '📱', android: '📱' };
+async function loadDevices() {
+  try {
+    state.remote = await api('/api/remote');
+    const r = state.remote;
+    const el = $('#devices');
+    if (!r.available) { el.innerHTML = `<div class="head"><b>🛰️ Tailscale</b></div><div class="muted">Tailscale n’est pas connecté sur le PC.</div>`; return; }
+    const all = [{ ...r.self, me: true }, ...r.peers].sort((a, b) => b.online - a.online);
+    el.innerHTML = `<div class="head"><b>🛰️ Mes appareils</b><span class="muted">${all.filter((d) => d.online).length}/${all.length} en ligne</span></div>
+      <ul class="dev-list">${all.map((d) => `<li><span class="dev-ico">${OS_ICON[d.os] || '🖥️'}</span><span class="dev-name">${esc(d.name)}${d.me ? ' <span class="muted">(ce PC)</span>' : ''}</span>
+        <span class="dev-st ${d.online ? 'on' : ''}">${d.online ? 'en ligne' : d.lastSeen && !d.lastSeen.startsWith('0001') ? `vu ${timeAgo(Date.parse(d.lastSeen))}` : 'hors ligne'}</span></li>`).join('')}</ul>
+      ${state.board?.tailnetUrl ? `<a class="hint" href="${esc(state.board.tailnetUrl)}" target="_blank" rel="noopener">Accès direct Tailscale ↗</a>` : ''}`;
+    $('#side-foot').textContent = r.dnsName ? `🛰️ ${r.dnsName.split('.')[0]} · Tailscale` : '';
+  } catch {}
+}
+
+// ---------- Boîte à outils partagée avec pages/*.js ----------
+window.HL = { $, $$, esc, api, state, toast, openModal, modal, pages, fmtSize, timeAgo, absUrl, deviceName, iconHtml, store };
 
 // ---------- Widgets ----------
 function tickClock() {

@@ -2,14 +2,18 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Homelab</title>
   <meta name="theme-color" content="#141517">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="pages.css">
 </head>
 <body>
   <div id="bg"></div>
@@ -61,58 +65,75 @@
     </div>
   </section>
 
-  <!-- Tableau de bord -->
-  <section id="view-app" class="view" hidden>
-    <header class="topbar">
-      <div class="brand"><img src="icon.svg" alt=""><span id="title">Homelab</span></div>
-      <div class="search">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="search" placeholder="Rechercher une app ou sur le web…  ( / )" autocomplete="off">
-      </div>
-      <div class="actions">
-        <button class="icon-btn admin-only" id="toggle-edit" title="Mode édition">
-          <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/></svg>
-        </button>
-        <button class="icon-btn admin-only" id="open-settings" title="Réglages">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-        </button>
-        <div class="menu-wrap">
-          <button class="avatar" id="avatar" title="Mon compte"></button>
-          <div class="menu" id="user-menu" hidden>
-            <div class="menu-head"><b id="menu-name"></b><span class="muted" id="menu-role"></span></div>
-            <button id="menu-password">Changer de mot de passe</button>
-            <button id="menu-logout" class="danger-text">Se déconnecter</button>
+  <!-- Application -->
+  <section id="view-app" class="view shell" hidden>
+    <nav class="sidebar" id="nav">
+      <div class="brand side-brand"><img src="icon.svg" alt=""><span id="title">Homelab</span></div>
+      <a href="#/" data-page="home"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span>Accueil</span></a>
+      <a href="#/drive" data-page="drive"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Drive</span></a>
+      <a href="#/clip" data-page="clip"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h6"/></svg><span>Presse-papiers</span></a>
+      <a href="#/ai" data-page="ai"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 7V4"/><circle cx="9" cy="13" r="1.2"/><circle cx="15" cy="13" r="1.2"/></svg><span>Assistant IA</span></a>
+      <a href="#/monitor" data-page="monitor"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Moniteur</span></a>
+      <div class="side-foot muted" id="side-foot"></div>
+    </nav>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="brand mobile-brand"><img src="icon.svg" alt=""><span id="title-m">Homelab</span></div>
+        <h1 class="page-title" id="page-title">Accueil</h1>
+        <div class="search" id="search-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="search" placeholder="Rechercher une app ou sur le web…  ( / )" autocomplete="off">
+        </div>
+        <div class="actions">
+          <button class="icon-btn admin-only home-only" id="toggle-edit" title="Mode édition">
+            <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/></svg>
+          </button>
+          <button class="icon-btn admin-only" id="open-settings" title="Réglages">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          </button>
+          <div class="menu-wrap">
+            <button class="avatar" id="avatar" title="Mon compte"></button>
+            <div class="menu" id="user-menu" hidden>
+              <div class="menu-head"><b id="menu-name"></b><span class="muted" id="menu-role"></span></div>
+              <button id="menu-password">Changer de mot de passe</button>
+              <button id="menu-logout" class="danger-text">Se déconnecter</button>
+            </div>
           </div>
         </div>
-      </div>
-    </header>
+      </header>
 
-    <div class="edit-banner" id="edit-banner" hidden>
-      <span>✏️ Mode édition — glisse les apps pour les ranger, clique pour les modifier.</span>
-      <div class="row">
-        <button class="btn" id="add-category">+ Catégorie</button>
-        <button class="btn primary" id="add-app">+ Application</button>
-        <button class="btn ghost" id="exit-edit">Terminer</button>
+      <div class="edit-banner" id="edit-banner" hidden>
+        <span>✏️ Mode édition — glisse les apps pour les ranger, clique pour les modifier.</span>
+        <div class="row">
+          <button class="btn" id="discover">🔍 Détecter mes services</button>
+          <button class="btn" id="add-category">+ Catégorie</button>
+          <button class="btn primary" id="add-app">+ Application</button>
+          <button class="btn ghost" id="exit-edit">Terminer</button>
+        </div>
       </div>
+
+      <!-- Accueil -->
+      <main class="container page" id="page-home">
+        <section class="widgets">
+          <div class="card widget clock">
+            <div class="greet" id="greet"></div>
+            <div class="time" id="clock"></div>
+            <div class="muted" id="date"></div>
+          </div>
+          <div class="card widget weather" id="weather"><div class="muted">Météo…</div></div>
+          <div class="card widget system" id="system"><div class="muted">Système…</div></div>
+          <div class="card widget devices" id="devices"><div class="muted">Appareils…</div></div>
+        </section>
+        <div id="board"></div>
+        <p class="empty muted" id="no-results" hidden>Aucune app ne correspond. Appuie sur <kbd>Entrée</kbd> pour chercher sur le web.</p>
+      </main>
+
+      <main class="container page" id="page-drive" hidden></main>
+      <main class="container page" id="page-clip" hidden></main>
+      <main class="container page page-ai" id="page-ai" hidden></main>
+      <main class="container page" id="page-monitor" hidden></main>
     </div>
-
-    <main class="container">
-      <section class="widgets">
-        <div class="card widget clock">
-          <div class="greet" id="greet"></div>
-          <div class="time" id="clock"></div>
-          <div class="muted" id="date"></div>
-        </div>
-        <div class="card widget weather" id="weather">
-          <div class="muted">Météo…</div>
-        </div>
-        <div class="card widget system" id="system">
-          <div class="muted">Système…</div>
-        </div>
-      </section>
-      <div id="board"></div>
-      <p class="empty muted" id="no-results" hidden>Aucune app ne correspond. Appuie sur <kbd>Entrée</kbd> pour chercher sur le web.</p>
-    </main>
   </section>
 
   <!-- Fenêtre modale générique -->
@@ -125,7 +146,24 @@
     </form>
   </dialog>
 
+  <!-- Visionneuse du Drive -->
+  <dialog id="viewer" class="viewer">
+    <div class="viewer-bar">
+      <b id="viewer-name"></b>
+      <div class="row">
+        <a class="btn small" id="viewer-dl">⬇ Télécharger</a>
+        <button class="btn small" id="viewer-close">✕</button>
+      </div>
+    </div>
+    <div class="viewer-body" id="viewer-body"></div>
+  </dialog>
+
   <div id="toasts"></div>
+  <div id="drop-overlay" hidden><div>📥 Dépose tes fichiers pour les envoyer</div></div>
   <script src="app.js"></script>
+  <script src="pages/drive.js"></script>
+  <script src="pages/clip.js"></script>
+  <script src="pages/ai.js"></script>
+  <script src="pages/monitor.js"></script>
 </body>
 </html>

@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, 'data');
+const DATA_DIR = process.env.HOMELAB_DATA || path.join(ROOT, 'data');
 const SITE_DIR = path.join(ROOT, '..', 'docs');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -60,7 +60,25 @@ CREATE TABLE IF NOT EXISTS apps (
   admin_only INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  username TEXT,
+  action TEXT NOT NULL,
+  ip TEXT,
+  detail TEXT
+);
+CREATE TABLE IF NOT EXISTS app_checks (
+  app_id INTEGER NOT NULL,
+  ts INTEGER NOT NULL,
+  up INTEGER NOT NULL,
+  ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_checks ON app_checks (app_id, ts);
 `);
+// Migrations
+const appCols = db.prepare('PRAGMA table_info(apps)').all().map((c) => c.name);
+if (!appCols.includes('remote')) db.exec('ALTER TABLE apps ADD COLUMN remote INTEGER NOT NULL DEFAULT 0');
 
 const DEFAULT_SETTINGS = {
   title: 'Mon Homelab',
@@ -120,6 +138,25 @@ function readToken(token) {
     return user;
   } catch { return null; }
 }
+// Jetons signés à usage spécifique (téléchargement, partage, accès aux apps…)
+// Le préfixe "purpose." garantit qu'un jeton d'un type ne peut pas servir pour un autre.
+function signData(purpose, obj, ttlMs) {
+  const payload = b64u(JSON.stringify({ ...obj, exp: Date.now() + ttlMs }));
+  return `${payload}.${crypto.createHmac('sha256', SECRET).update(`${purpose}.${payload}`).digest('base64url')}`;
+}
+function verifyData(purpose, token) {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  const [payload, sig] = token.split('.');
+  const expected = crypto.createHmac('sha256', SECRET).update(`${purpose}.${payload}`).digest('base64url');
+  if (!sig || sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    return data.exp >= Date.now() ? data : null;
+  } catch { return null; }
+}
+function logEvent(username, action, ip, detail = '') {
+  db.prepare('INSERT INTO events (ts, username, action, ip, detail) VALUES (?, ?, ?, ?, ?)').run(Date.now(), username || null, action, ip || null, String(detail).slice(0, 300));
+}
 const publicUser = (u) => u && ({ id: u.id, username: u.username, email: u.email, role: u.role, status: u.status, created_at: u.created_at, last_login: u.last_login });
 
 // ---------- Anti brute-force ----------
@@ -152,9 +189,13 @@ function ping(target) {
 }
 async function checkAll() {
   const list = db.prepare('SELECT id, url, ping_url FROM apps WHERE ping = 1').all();
+  const now = Date.now();
   await Promise.all(list.map(async (a) => {
-    status[a.id] = { ...(await ping(a.ping_url || a.url)), checkedAt: Date.now() };
+    status[a.id] = { ...(await ping(a.ping_url || a.url)), checkedAt: now };
+    db.prepare('INSERT INTO app_checks (app_id, ts, up, ms) VALUES (?, ?, ?, ?)').run(a.id, now, status[a.id].up ? 1 : 0, status[a.id].ms || null);
   }));
+  db.prepare('DELETE FROM app_checks WHERE ts < ?').run(now - 7 * 864e5);
+  db.prepare('DELETE FROM events WHERE ts < ?').run(now - 90 * 864e5);
 }
 setInterval(checkAll, 60e3);
 setTimeout(checkAll, 1000);
@@ -232,7 +273,7 @@ const route = (method, pattern, opts, handler) => {
 
 route('GET', '/api/health', () => {
   const s = getSettings();
-  return { ok: true, title: s.title, registration: s.registration, hasUsers: db.prepare('SELECT COUNT(*) AS n FROM users').get().n > 0 };
+  return { ok: true, title: s.title, registration: s.registration, hasUsers: db.prepare('SELECT COUNT(*) AS n FROM users').get().n > 0, publicUrl: publicUrl() };
 });
 
 route('POST', '/api/auth/register', async (req) => {
@@ -252,6 +293,7 @@ route('POST', '/api/auth/register', async (req) => {
   const id = db.prepare('INSERT INTO users (username, email, password_hash, role, status) VALUES (?, ?, ?, ?, ?)')
     .run(name, str(email, 120), hashPassword(String(password)), role, st).lastInsertRowid;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  logEvent(name, st === 'pending' ? 'inscription (en attente)' : 'inscription', clientIp(req));
   if (st === 'pending') return { pending: true, message: 'Compte créé ! Un admin doit le valider.' };
   return { token: signToken(user), user: publicUser(user) };
 });
@@ -260,7 +302,11 @@ route('POST', '/api/auth/login', async (req) => {
   if (rateLimited(clientIp(req), 'login')) throw httpError(429, 'Trop de tentatives, attends 15 minutes');
   const { username, password } = await readBody(req);
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(str(username, 32));
-  if (!user || !verifyPassword(String(password || ''), user.password_hash)) throw httpError(401, 'Identifiants incorrects');
+  if (!user || !verifyPassword(String(password || ''), user.password_hash)) {
+    logEvent(str(username, 32), 'échec de connexion', clientIp(req));
+    throw httpError(401, 'Identifiants incorrects');
+  }
+  logEvent(user.username, 'connexion', clientIp(req));
   if (user.status === 'pending') throw httpError(403, 'Ton compte attend la validation d’un admin');
   if (user.status !== 'active') throw httpError(403, 'Compte désactivé');
   db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(user.id);
@@ -285,7 +331,8 @@ route('GET', '/api/board', { auth: 'user' }, (req) => {
   const apps = db.prepare('SELECT * FROM apps ORDER BY position, id').all().filter((a) => isAdmin || !a.admin_only);
   return {
     settings: getSettings(),
-    categories: cats.map((c) => ({ ...c, apps: apps.filter((a) => a.category_id === c.id) })),
+    categories: cats.map((c) => ({ ...c, apps: apps.filter((a) => a.category_id === c.id).map((a) => ({ ...a, remote_url: a.remote ? ctx.remoteUrl(a.id) : null })) })),
+    tailnetUrl: ctx.remoteUrl(0),
   };
 });
 
@@ -303,6 +350,7 @@ route('PUT', '/api/categories/:id', { auth: 'admin' }, async (req, p) => {
 });
 route('DELETE', '/api/categories/:id', { auth: 'admin' }, (req, p) => {
   db.prepare('DELETE FROM categories WHERE id = ?').run(Number(p.id));
+  ctx.syncRemote();
   return { ok: true };
 });
 
@@ -317,7 +365,9 @@ function appFields(b) {
     new_tab: b.new_tab === false ? 0 : 1,
     ping: b.ping === false ? 0 : 1,
     admin_only: b.admin_only ? 1 : 0,
+    remote: b.remote ? 1 : 0,
   };
+  if (f.remote && !ctx.isPrivateUrl(f.url)) throw httpError(400, '« Accessible de partout » sert aux apps locales (localhost, 192.168.x.x…). Une app déjà publique n’en a pas besoin.');
   if (!f.name) throw httpError(400, 'Nom requis');
   if (!validUrl(f.url)) throw httpError(400, 'URL invalide (http:// ou https://)');
   if (f.ping_url && !validUrl(f.ping_url)) throw httpError(400, 'URL de ping invalide');
@@ -327,8 +377,9 @@ function appFields(b) {
 route('POST', '/api/apps', { auth: 'admin' }, async (req) => {
   const f = appFields(await readBody(req));
   f.position = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM apps WHERE category_id = ?').get(f.category_id).p;
-  const id = Number(db.prepare(`INSERT INTO apps (category_id, name, url, ping_url, icon, description, new_tab, ping, admin_only, position)
-    VALUES (:category_id, :name, :url, :ping_url, :icon, :description, :new_tab, :ping, :admin_only, :position)`).run(f).lastInsertRowid);
+  const id = Number(db.prepare(`INSERT INTO apps (category_id, name, url, ping_url, icon, description, new_tab, ping, admin_only, remote, position)
+    VALUES (:category_id, :name, :url, :ping_url, :icon, :description, :new_tab, :ping, :admin_only, :remote, :position)`).run(f).lastInsertRowid);
+  ctx.syncRemote();
   if (f.ping) ping(f.ping_url || f.url).then((r) => (status[id] = { ...r, checkedAt: Date.now() }));
   return { id };
 });
@@ -336,7 +387,8 @@ route('PUT', '/api/apps/:id', { auth: 'admin' }, async (req, p) => {
   const f = appFields(await readBody(req));
   f.id = Number(p.id);
   db.prepare(`UPDATE apps SET category_id = :category_id, name = :name, url = :url, ping_url = :ping_url, icon = :icon,
-    description = :description, new_tab = :new_tab, ping = :ping, admin_only = :admin_only WHERE id = :id`).run(f);
+    description = :description, new_tab = :new_tab, ping = :ping, admin_only = :admin_only, remote = :remote WHERE id = :id`).run(f);
+  ctx.syncRemote();
   if (f.ping) ping(f.ping_url || f.url).then((r) => (status[f.id] = { ...r, checkedAt: Date.now() }));
   else delete status[f.id];
   return { ok: true };
@@ -344,6 +396,7 @@ route('PUT', '/api/apps/:id', { auth: 'admin' }, async (req, p) => {
 route('DELETE', '/api/apps/:id', { auth: 'admin' }, (req, p) => {
   db.prepare('DELETE FROM apps WHERE id = ?').run(Number(p.id));
   delete status[p.id];
+  ctx.syncRemote();
   return { ok: true };
 });
 
@@ -415,14 +468,15 @@ route('POST', '/api/import', { auth: 'admin' }, async (req) => {
     for (const c of data.categories) map[c.id] = db.prepare('INSERT INTO categories (name, position) VALUES (?, ?)').run(str(c.name, 60), Number(c.position) || 0).lastInsertRowid;
     for (const a of data.apps) {
       if (!map[a.category_id]) continue;
-      db.prepare('INSERT INTO apps (category_id, name, url, ping_url, icon, description, position, new_tab, ping, admin_only) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      db.prepare('INSERT INTO apps (category_id, name, url, ping_url, icon, description, position, new_tab, ping, admin_only, remote) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
         .run(map[a.category_id], str(a.name, 60), str(a.url, 1000), a.ping_url ? str(a.ping_url, 1000) : null, str(a.icon, 1000), str(a.description, 200),
-          Number(a.position) || 0, a.new_tab ? 1 : 0, a.ping ? 1 : 0, a.admin_only ? 1 : 0);
+          Number(a.position) || 0, a.new_tab ? 1 : 0, a.ping ? 1 : 0, a.admin_only ? 1 : 0, a.remote && ctx.isPrivateUrl(a.url) ? 1 : 0);
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   for (const k of Object.keys(status)) delete status[k];
   checkAll();
+  ctx.syncRemote();
   return { ok: true };
 });
 
@@ -439,13 +493,27 @@ function serveStatic(req, res, pathname) {
   });
 }
 
+// Adresse publique (tunnel) lue dans docs/config.json, écrite par start-homelab.ps1
+function publicUrl() {
+  try { return JSON.parse(fs.readFileSync(path.join(SITE_DIR, 'config.json'), 'utf8')).apiUrl || ''; } catch { return ''; }
+}
+
+// ---------- Modules (Drive, presse-papiers, IA, moniteur, accès distant) ----------
+const ctx = {
+  db, route, httpError, readBody, send, str, validUrl, readToken, signData, verifyData, logEvent, getSettings,
+  clientIp, publicUrl, status, config, DATA_DIR, ROOT, ping,
+  // remplacés par lib/remote.js
+  remoteUrl: () => null, syncRemote: () => {}, isPrivateUrl: () => false,
+};
+for (const mod of ['remote', 'drive', 'clipboard', 'ai', 'monitor']) require(`./lib/${mod}`)(ctx);
+
 // ---------- Serveur ----------
 const server = http.createServer(async (req, res) => {
   cors(req, res);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   const { pathname } = new URL(req.url, 'http://x');
-  if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
+  if (!pathname.startsWith('/api/') && !pathname.startsWith('/s/')) return serveStatic(req, res, pathname);
 
   for (const r of routes) {
     if (r.method !== req.method) continue;
@@ -459,15 +527,19 @@ const server = http.createServer(async (req, res) => {
         if (r.auth === 'admin' && user.role !== 'admin') throw httpError(403, 'Réservé aux admins');
         req.user = user;
       }
-      return send(res, 200, await r.handler(req, params));
+      const out = await r.handler(req, params, res);
+      if (!res.headersSent) send(res, 200, out); // les handlers « bruts » (fichiers, flux) écrivent eux-mêmes
+      return;
     } catch (e) {
       if (!e.status) console.error(e);
+      if (res.headersSent) return res.destroy();
       return send(res, e.status || 500, { error: e.status ? e.message : 'Erreur serveur' });
     }
   }
   send(res, 404, { error: 'Route inconnue' });
 });
 
+server.requestTimeout = 0; // gros envois de fichiers
 server.listen(PORT, config.host, () => {
   console.log(`🏠 Homelab API prête sur http://localhost:${PORT}`);
 });

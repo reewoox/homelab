@@ -26,6 +26,25 @@ powershell -ExecutionPolicy Bypass -File scripts\stop-homelab.ps1
 
 En local tu peux aussi ouvrir directement http://localhost:7575.
 
+## Apps intégrées
+
+| App | À quoi ça sert |
+|---|---|
+| 📁 **Drive** | Tes fichiers sur le PC depuis tous tes appareils : envoi (glisser-déposer, gros fichiers par morceaux), aperçu photos/vidéos/PDF, dossiers, déplacer, liens de partage publics. Espace perso + dossier « Commun ». Stocké dans `~/HomelabDrive`. |
+| 📋 **Presse-papiers** | Copie un texte/lien sur ton téléphone, récupère-le sur le PC (et inversement). Épingler, historique. |
+| 🤖 **Assistant IA** | Chat avec tes modèles Ollama locaux, réponses en direct, discussions synchronisées entre appareils. |
+| 📊 **Moniteur** | CPU/RAM sur 1 h, disponibilité de chaque app sur 24 h, journal de sécurité (connexions, échecs, partages). |
+
+## Apps locales accessibles de partout (Tailscale)
+
+Coche **🌐 Accessible de partout** sur une app locale (`http://localhost:…`, `192.168.x.x`) :
+le serveur crée automatiquement une adresse `https://ml.tail76e554.ts.net:100XX` avec `tailscale serve`
+(visible uniquement par tes appareils Tailscale). Hors de chez toi, la tuile ouvre cette adresse.
+Le homelab lui-même est aussi sur `https://ml.tail76e554.ts.net:10000`.
+Les ports 10000-10999 sont gérés par le homelab ; ta config existante (port 443) n'est jamais modifiée.
+
+Mode édition → **🔍 Détecter mes services** : scanne le PC et propose d'ajouter les services trouvés.
+
 ## Fonctionnalités
 
 - Connexion / inscription (le **premier compte créé devient admin**)
