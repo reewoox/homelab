@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion Gmail</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg:#141517; --card:#1f2024; --b:#373a40; --t:#e9ecef; --m:#909296; --a:#fa5252; --ok:#40c057; --ko:#ff6b6b; color-scheme:dark; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f1f3f5; --card:#fff; --b:#dee2e6; --t:#1a1b1e; --m:#6c727a; color-scheme:light; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--t); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display:grid; place-items:center; padding:24px 16px; }
+  .card { width:min(520px,100%); background:var(--card); border:1px solid var(--b); border-radius:16px; padding:26px; }
+  h1 { font-size:20px; margin:0 0 4px; display:flex; align-items:center; gap:10px; }
+  p { margin:0 0 14px; }
+  .m { color:var(--m); font-size:14px; }
+  ol { padding-left:20px; margin:0 0 18px; display:grid; gap:8px; font-size:14px; }
+  a { color:var(--a); }
+  label { display:grid; gap:5px; font-size:13px; font-weight:600; margin-bottom:12px; }
+  input { font:inherit; padding:10px 12px; border-radius:9px; border:1px solid var(--b); background:var(--bg); color:var(--t); width:100%; }
+  input:focus { outline:none; border-color:var(--a); }
+  button { font:inherit; font-weight:600; padding:11px 16px; border-radius:10px; border:0; background:var(--a); color:#fff; cursor:pointer; width:100%; }
+  button.ghost { background:transparent; border:1px solid var(--b); color:var(--t); width:auto; padding:7px 12px; font-weight:500; }
+  button:disabled { opacity:.6; cursor:wait; }
+  .err { color:var(--ko); font-size:14px; margin:0 0 12px; }
+  .bar { height:10px; border-radius:99px; background:var(--bg); overflow:hidden; margin:14px 0 8px; }
+  .bar i { display:block; height:100%; width:0; background:var(--a); transition:width .5s; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:14px 0; }
+  .stats div { background:var(--bg); border-radius:10px; padding:10px; text-align:center; }
+  .stats b { display:block; font-size:22px; font-variant-numeric:tabular-nums; }
+  .stats span { font-size:12px; color:var(--m); }
+  pre { background:var(--bg); border-radius:10px; padding:10px; font-size:12px; max-height:140px; overflow:auto; white-space:pre-wrap; margin:0; color:var(--m); }
+  .done { color:var(--ok); font-weight:600; }
+  .lock { font-size:12px; color:var(--m); margin-top:12px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <section id="form-view">
+    <h1>📧 Connecter mon Gmail</h1>
+    <p class="m">Les photos, vidéos et audios en pièce jointe de tes mails seront copiés dans ton Drive perso, dans <b>Mails / Photos·Vidéos·Audio / année / mois / expéditeur</b>.</p>
+    <ol>
+      <li>Ouvre <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a> et connecte-toi à Google.<br><span class="m">Si la page est indisponible, active d’abord la <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank" rel="noopener">validation en deux étapes</a>.</span></li>
+      <li>Crée un mot de passe d’application nommé <b>Homelab</b>.</li>
+      <li>Colle les 16 lettres ci-dessous.</li>
+    </ol>
+    <form id="f">
+      <label>Adresse Gmail<input name="email" type="email" required value="matthieulefevre94120@gmail.com" autocomplete="email"></label>
+      <label>Mot de passe d’application<input name="password" type="password" required placeholder="abcd efgh ijkl mnop" autocomplete="off" spellcheck="false"></label>
+      <p class="err" id="err" hidden></p>
+      <button id="go">Connecter et importer</button>
+    </form>
+    <p class="lock">🔒 Lecture seule : aucun mail n’est modifié, ni marqué comme lu. Le mot de passe sert uniquement à cette connexion : il n’est jamais enregistré. Tu peux le révoquer à la fin.</p>
+  </section>
+
+  <section id="run-view" hidden>
+    <h1 id="run-title">⏳ Import en cours…</h1>
+    <p class="m" id="run-sub"></p>
+    <div class="bar"><i id="bar"></i></div>
+    <p class="m" id="count"></p>
+    <div class="stats">
+      <div><b id="s-saved">0</b><span>fichiers copiés</span></div>
+      <div><b id="s-size">0</b><span>Mo</span></div>
+      <div><b id="s-dup">0</b><span>doublons ignorés</span></div>
+    </div>
+    <pre id="log"></pre>
+    <p style="margin-top:14px;display:flex;gap:8px;justify-content:space-between;align-items:center">
+      <span class="m" id="hint">Tu peux fermer cette page, l’import continue sur le PC.</span>
+      <button class="ghost" id="stop">Arrêter</button>
+    </p>
+  </section>
+</div>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const API = '/local/api/mail-import';
+let timer;
+
+async function call(method, body) {
+  const r = await fetch(API + (method === 'STOP' ? '/stop' : ''), {
+    method: method === 'STOP' ? 'POST' : method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Erreur ' + r.status);
+  return j;
+}
+
+$('#f').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  $('#err').hidden = true; $('#go').disabled = true;
+  try {
+    await call('POST', { email: fd.get('email'), password: fd.get('password') });
+    e.target.password.value = '';
+    poll();
+  } catch (ex) { $('#err').textContent = ex.message; $('#err').hidden = false; }
+  finally { $('#go').disabled = false; }
+};
+$('#stop').onclick = async () => { if (confirm('Arrêter l’import ? Il pourra reprendre là où il s’est arrêté.')) await call('STOP'); };
+
+async function poll() {
+  clearTimeout(timer);
+  let s;
+  try { s = await call('GET'); } catch { timer = setTimeout(poll, 3000); return; }
+  const j = s.job;
+  if (!j) { show('form'); return; }
+  show('run');
+  const p = j.progress || {};
+  const pct = p.total ? Math.round((100 * p.done) / p.total) : (p.final ? 100 : 0);
+  $('#bar').style.width = pct + '%';
+  $('#run-sub').textContent = j.email;
+  $('#count').textContent = p.total != null ? `${p.done} / ${p.total} mails analysés (${pct} %) · ${p.all} mails contiennent des médias` : 'Connexion à Gmail et recherche des mails…';
+  $('#s-saved').textContent = p.saved || 0;
+  $('#s-size').textContent = Math.round((p.bytes || 0) / 1e6);
+  $('#s-dup').textContent = p.dup || 0;
+  $('#log').textContent = j.log.join('\n') || '…';
+  $('#stop').hidden = !j.running;
+  if (j.running) { $('#run-title').textContent = '⏳ Import en cours…'; timer = setTimeout(poll, 1500); return; }
+  if (j.error) {
+    $('#run-title').textContent = '⚠️ ' + (j.error.includes('ÉCHEC') ? 'Connexion refusée' : 'Import interrompu');
+    $('#hint').innerHTML = `${j.error.replace(/</g, '&lt;')} <a href="#" id="again">Réessayer</a>`;
+  } else {
+    $('#run-title').innerHTML = '<span class="done">✅ Import terminé</span>';
+    $('#hint').innerHTML = 'Tout est dans ton Drive → <b>Mails</b>. Pense à révoquer le mot de passe d’application sur <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>.';
+  }
+  const again = $('#again');
+  if (again) again.onclick = (e) => { e.preventDefault(); show('form'); };
+}
+function show(v) { $('#form-view').hidden = v !== 'form'; $('#run-view').hidden = v !== 'run'; }
+poll();
+</script>
+</body>
+</html>

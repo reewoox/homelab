@@ -505,7 +505,7 @@ const ctx = {
   // remplacés par lib/remote.js
   remoteUrl: () => null, syncRemote: () => {}, isPrivateUrl: () => false,
 };
-for (const mod of ['remote', 'drive', 'clipboard', 'ai', 'monitor']) require(`./lib/${mod}`)(ctx);
+for (const mod of ['remote', 'drive', 'clipboard', 'ai', 'monitor', 'mailimport']) require(`./lib/${mod}`)(ctx);
 
 // ---------- Serveur ----------
 const server = http.createServer(async (req, res) => {
@@ -513,7 +513,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   const { pathname } = new URL(req.url, 'http://x');
-  if (!pathname.startsWith('/api/') && !pathname.startsWith('/s/')) return serveStatic(req, res, pathname);
+  if (!pathname.startsWith('/api/') && !pathname.startsWith('/s/') && !pathname.startsWith('/local/')) return serveStatic(req, res, pathname);
 
   for (const r of routes) {
     if (r.method !== req.method) continue;
