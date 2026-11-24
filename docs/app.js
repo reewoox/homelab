@@ -36,6 +36,33 @@ const deviceName = () => {
   if (/Mac/.test(ua)) return 'Mac';
   return 'Appareil';
 };
+// Prévient l'île 3D (scene3d.js) qu'une donnée a changé : hl:board, hl:status, hl:system, hl:devices, hl:weather, hl:accent
+const emit = (name) => document.dispatchEvent(new CustomEvent(`hl:${name}`));
+// Couleur d'un quartier (catégorie) : la même dans la liste et sur l'île
+const CAT_COLORS = [[/draco/, '#fb923c'], [/cha[iî]ne|direct|stream/, '#f472b6'], [/site|web/, '#60a5fa'], [/\bia\b|\bai\b|auto|intelligence/, '#a78bfa'],
+  [/sauvegarde|backup|photo/, '#fbbf24'], [/fichier|file|drive|stockage/, '#2dd4bf'], [/\bpc\b|machine|local/, '#22d3ee'], [/outil|tool|dev/, '#94a3b8'], [/m[ée]dia|vid[ée]o/, '#e879f9']];
+const CAT_SPARE = ['#38bdf8', '#f59e0b', '#c084fc', '#facc15', '#818cf8', '#2dd4bf'];
+function catColor(cat) {
+  const n = String(cat.name).toLowerCase();
+  for (const [re, c] of CAT_COLORS) if (re.test(n)) return c;
+  return CAT_SPARE[Math.abs(Number(cat.id) || 0) % CAT_SPARE.length];
+}
+// Couleur d'accent : deuxième teinte (dégradés) et couleur du texte posé dessus
+function hexToHsl(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  if (!d) return [0, 0, l * 100];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, s * 100, l * 100];
+}
+function accentVars(hex) {
+  if (!/^#[0-9a-f]{6}$/i.test(hex || '')) return null;
+  const [h, s, l] = hexToHsl(hex);
+  const lum = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const L = 0.2126 * lum[0] + 0.7152 * lum[1] + 0.0722 * lum[2];
+  return { accent: hex, accent2: `hsl(${Math.round((h + 70) % 360)} ${Math.round(Math.max(s, 60))}% ${Math.round(Math.min(Math.max(l, 66), 76))}%)`, on: L > 0.3 ? '#04111d' : '#ffffff' };
+}
 
 // ---------- API ----------
 async function resolveApi() {
@@ -178,7 +205,7 @@ async function enterApp() {
 }
 
 // ---------- Navigation entre les pages ----------
-const PAGES = { home: 'Accueil', drive: 'Drive', clip: 'Presse-papiers', ai: 'Assistant IA', monitor: 'Moniteur' };
+const PAGES = { home: 'Accueil', drive: 'Drive', clip: 'Presse-papiers', ai: 'Assistant IA', monitor: 'Moniteur', remote: 'Remote' };
 const pages = {}; // remplis par pages/*.js : { enter(el), leave() }
 function route() {
   if (!state.user) return;
@@ -205,6 +232,8 @@ async function loadBoard() {
   }
   applySettings(state.board.settings);
   renderBoard();
+  renderHeroStats();
+  emit('board');
   loadWeather();
 }
 
@@ -212,7 +241,15 @@ function applySettings(s) {
   document.title = s.title;
   $('#title').textContent = s.title;
   $('#title-m').textContent = s.title;
-  if (s.accent) document.documentElement.style.setProperty('--accent', s.accent);
+  const av = accentVars(s.accent);
+  if (av) {
+    const st = document.documentElement.style;
+    const changed = st.getPropertyValue('--accent') !== av.accent;
+    st.setProperty('--accent', av.accent);
+    st.setProperty('--accent-2', av.accent2);
+    st.setProperty('--on-accent', av.on);
+    if (changed) emit('accent');
+  }
   const bg = $('#bg');
   if (s.background) { bg.style.backgroundImage = `url("${encodeURI(s.background)}")`; bg.classList.add('has-image'); }
   else { bg.style.backgroundImage = ''; bg.classList.remove('has-image'); }
@@ -254,9 +291,9 @@ function renderBoard() {
     shown += apps.length;
     if (q && !apps.length) return '';
     if (!state.editing && !apps.length) return '';
-    return `<section class="category" data-cat="${c.id}">
+    return `<section class="category" data-cat="${c.id}" style="--c:${catColor(c)}">
       <div class="category-head">
-        <h2>${esc(c.name)}</h2><span class="count">${apps.length}</span>
+        <span class="cat-dot" aria-hidden="true"></span><h2>${esc(c.name)}</h2><span class="count">${apps.length}</span>
         ${state.editing ? `<div class="tools">
           <button class="icon-btn" data-act="cat-up" title="Monter" ${ci === 0 ? 'disabled' : ''}>↑</button>
           <button class="icon-btn" data-act="cat-down" title="Descendre" ${ci === state.board.categories.length - 1 ? 'disabled' : ''}>↓</button>
@@ -311,8 +348,53 @@ function paintStatus() {
   });
 }
 async function loadStatus() {
-  try { state.status = await api('/api/status'); paintStatus(); } catch {}
+  try { state.status = await api('/api/status'); paintStatus(); renderHeroStats(); emit('status'); } catch {}
 }
+
+// Pastilles du bandeau 3D : services en ligne / en panne, appareils
+function renderHeroStats() {
+  const el = $('#hero-stats');
+  if (!el || !state.board) return;
+  const apps = state.board.categories.flatMap((c) => c.apps);
+  const watched = apps.filter((a) => a.ping);
+  const known = watched.filter((a) => state.status[a.id]);
+  const down = known.filter((a) => !state.status[a.id].up);
+  const r = state.remote;
+  const devs = r?.available ? [r.self, ...r.peers] : [];
+  el.innerHTML = `<span class="chip ok"><i></i>${known.length - down.length}/${watched.length} en ligne</span>`
+    + (down.length ? `<span class="chip ko" title="${esc(down.map((a) => a.name).join(', '))}"><i></i>${down.length} en panne : ${esc(down.slice(0, 2).map((a) => a.name).join(', '))}${down.length > 2 ? '…' : ''}</span>` : '')
+    + `<span class="chip chip-apps"><i class="acc"></i>${apps.length} applis</span>`
+    + (devs.length ? `<span class="chip"><i class="vio"></i>${devs.filter((d) => d.online).length}/${devs.length} appareils</span>` : '');
+}
+
+// Tuiles en verre qui s'inclinent sous la souris (reflet qui suit le pointeur)
+(() => {
+  const board = $('#board');
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  let cur = null, raf = 0, last = null;
+  const reset = (t) => { if (!t) return; t.classList.remove('tilting'); ['--rx', '--ry', '--gx', '--gy'].forEach((p) => t.style.removeProperty(p)); };
+  board.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || state.editing || still.matches) return;
+    const t = e.target.closest('.tile[data-app]');
+    if (cur && cur !== t) reset(cur);
+    cur = t;
+    if (!t) return;
+    last = e;
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      if (!cur || !last) return;
+      const r = cur.getBoundingClientRect();
+      const px = Math.min(1, Math.max(0, (last.clientX - r.left) / r.width)), py = Math.min(1, Math.max(0, (last.clientY - r.top) / r.height));
+      cur.classList.add('tilting');
+      cur.style.setProperty('--ry', `${((px - 0.5) * 16).toFixed(2)}deg`);
+      cur.style.setProperty('--rx', `${((0.5 - py) * 12).toFixed(2)}deg`);
+      cur.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
+      cur.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
+    });
+  });
+  board.addEventListener('pointerleave', () => { reset(cur); cur = null; });
+})();
 
 const findApp = (id) => state.board.categories.flatMap((c) => c.apps).find((a) => a.id === Number(id));
 
@@ -701,11 +783,13 @@ async function loadDevices() {
         <span class="dev-st ${d.online ? 'on' : ''}">${d.online ? 'en ligne' : d.lastSeen && !d.lastSeen.startsWith('0001') ? `vu ${timeAgo(Date.parse(d.lastSeen))}` : 'hors ligne'}</span></li>`).join('')}</ul>
       ${state.board?.tailnetUrl ? `<a class="hint" href="${esc(state.board.tailnetUrl)}" target="_blank" rel="noopener">Accès direct Tailscale ↗</a>` : ''}`;
     $('#side-foot').textContent = r.dnsName ? `🛰️ ${r.dnsName.split('.')[0]} · Tailscale` : '';
+    renderHeroStats();
+    emit('devices');
   } catch {}
 }
 
-// ---------- Boîte à outils partagée avec pages/*.js ----------
-window.HL = { $, $$, esc, api, state, toast, openModal, modal, pages, fmtSize, timeAgo, absUrl, deviceName, iconHtml, store };
+// ---------- Boîte à outils partagée avec pages/*.js et l'île 3D ----------
+window.HL = { $, $$, esc, api, state, toast, openModal, modal, pages, fmtSize, timeAgo, absUrl, deviceName, iconHtml, store, appHref, catColor, slug, isEmoji, letterColor, ICON_CDN };
 
 // ---------- Widgets ----------
 function tickClock() {
@@ -721,14 +805,19 @@ async function loadWeather() {
   const s = state.board?.settings;
   if (!s?.weatherLat) return;
   try {
-    const w = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${s.weatherLat}&longitude=${s.weatherLon}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=4`).then((r) => r.json());
+    const w = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${s.weatherLat}&longitude=${s.weatherLon}&current=temperature_2m,weather_code,is_day,cloud_cover,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=auto&forecast_days=4`).then((r) => r.json());
+    if (!w.current) throw new Error('météo');
+    state.weather = w;
     const [ico, label] = WMO[w.current.weather_code] || ['🌡️', ''];
+    const hm = (iso) => (iso ? iso.slice(11, 16).replace(':', ' h ') : '');
     $('#weather').innerHTML = `<div class="big">${ico}</div>
       <div>
         <div class="temp">${Math.round(w.current.temperature_2m)}°</div>
         <div class="muted">${esc(label)} · ${esc(s.weatherCity)}</div>
         <div class="days">${w.daily.time.slice(1).map((t, i) => `<div><span class="muted">${new Date(t).toLocaleDateString('fr-FR', { weekday: 'short' })}</span><span>${(WMO[w.daily.weather_code[i + 1]] || ['🌡️'])[0]}</span><span>${Math.round(w.daily.temperature_2m_max[i + 1])}° <span class="muted">${Math.round(w.daily.temperature_2m_min[i + 1])}°</span></span></div>`).join('')}</div>
+        ${w.daily.sunrise?.[0] ? `<div class="sun-times muted">🌅 ${hm(w.daily.sunrise[0])} · 🌇 ${hm(w.daily.sunset[0])}</div>` : ''}
       </div>`;
+    emit('weather');
   } catch { $('#weather').innerHTML = '<div class="muted">Météo indisponible</div>'; }
 }
 
@@ -739,15 +828,20 @@ function fmtUptime(s) {
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
   return d ? `${d} j ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
 }
+// Jauge circulaire (processeur, mémoire)
+const ring = (label, pct, detail) => `<div class="ring ${level(pct)}">
+  <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="trk" cx="32" cy="32" r="26"/><circle class="val" cx="32" cy="32" r="26" pathLength="100" stroke-dasharray="${Math.max(1, pct)} 100"/></svg>
+  <div class="ring-txt"><b>${pct}<small>%</small></b><span>${label}</span><span class="muted">${detail}</span></div></div>`;
 async function loadSystem() {
   try {
     const s = await api('/api/system');
+    state.system = s;
     const memUsed = s.memory.total - s.memory.free;
     const memPct = Math.round((100 * memUsed) / s.memory.total);
     $('#system').innerHTML = `<div class="head"><b>🖥️ ${esc(s.hostname)}</b><span class="muted">allumé depuis ${fmtUptime(s.uptime)}</span></div>
-      ${meter('CPU', s.cpu.usage, `${s.cpu.usage} % · ${s.cpu.cores} cœurs`)}
-      ${meter('RAM', memPct, `${gb(memUsed)} / ${gb(s.memory.total)} Go`)}
+      <div class="rings">${ring('Processeur', s.cpu.usage, `${s.cpu.cores} cœurs`)}${ring('Mémoire', memPct, `${gb(memUsed)} / ${gb(s.memory.total)} Go`)}</div>
       ${s.disks.slice(0, 3).map((d) => { const p = Math.round((100 * (d.total - d.free)) / d.total); return meter(`Disque ${esc(d.name)}`, p, `${gb(d.free)} Go libres`); }).join('')}`;
+    emit('system');
   } catch (e) {
     if (e.offline) $('#system').innerHTML = '<div class="error">⚠️ PC injoignable</div>';
   }

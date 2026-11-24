@@ -4,19 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Homelab</title>
-  <meta name="theme-color" content="#141517">
+  <meta name="theme-color" content="#070a16">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="pages.css">
 </head>
 <body>
   <div id="bg"></div>
+  <!-- Dégradé partagé par les jauges circulaires -->
+  <svg class="defs" aria-hidden="true" focusable="false"><defs>
+    <linearGradient id="hl-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color: var(--accent)"/><stop offset="1" style="stop-color: var(--accent-2)"/></linearGradient>
+  </defs></svg>
 
   <!-- Chargement -->
   <section id="view-loading" class="view center">
@@ -74,6 +80,7 @@
       <a href="#/clip" data-page="clip"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h6"/></svg><span>Presse-papiers</span></a>
       <a href="#/ai" data-page="ai"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 7V4"/><circle cx="9" cy="13" r="1.2"/><circle cx="15" cy="13" r="1.2"/></svg><span>Assistant IA</span></a>
       <a href="#/monitor" data-page="monitor"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Moniteur</span></a>
+      <a href="#/remote" data-page="remote" class="admin-only"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="M6 18h6M9 14v4"/><rect x="17.5" y="8" width="4.5" height="12" rx="1.2"/></svg><span>Remote</span></a>
       <div class="side-foot muted" id="side-foot"></div>
     </nav>
 
@@ -115,12 +122,24 @@
 
       <!-- Accueil -->
       <main class="container page" id="page-home">
-        <section class="widgets">
-          <div class="card widget clock">
-            <div class="greet" id="greet"></div>
-            <div class="time" id="clock"></div>
-            <div class="muted" id="date"></div>
+        <!-- L'île du homelab en 3D (scene3d.js) : chaque appli est un bâtiment, le ciel suit l'heure et la météo -->
+        <section class="hero" id="hero" data-phase="jour">
+          <canvas id="island" aria-hidden="true"></canvas>
+          <div class="island-labels" id="island-labels"></div>
+          <div class="hero-overlay">
+            <div class="hero-clock">
+              <div class="greet" id="greet"></div>
+              <div class="time" id="clock"></div>
+              <div class="date" id="date"></div>
+            </div>
+            <div class="hero-foot">
+              <div class="hero-stats" id="hero-stats"></div>
+              <div class="hero-hint" id="hero-hint"><span class="hint-touch">Glisse pour faire tourner l’île · touche un bâtiment</span><span class="hint-mouse">Glisse pour faire tourner l’île · clique un bâtiment pour l’ouvrir</span></div>
+            </div>
           </div>
+          <div class="island-tip" id="island-tip" hidden></div>
+        </section>
+        <section class="widgets">
           <div class="card widget weather" id="weather"><div class="muted">Météo…</div></div>
           <div class="card widget system" id="system"><div class="muted">Système…</div></div>
           <div class="card widget devices" id="devices"><div class="muted">Appareils…</div></div>
@@ -133,6 +152,7 @@
       <main class="container page" id="page-clip" hidden></main>
       <main class="container page page-ai" id="page-ai" hidden></main>
       <main class="container page" id="page-monitor" hidden></main>
+      <main class="container page" id="page-remote" hidden></main>
     </div>
   </section>
 
@@ -165,5 +185,7 @@
   <script src="pages/clip.js"></script>
   <script src="pages/ai.js"></script>
   <script src="pages/monitor.js"></script>
+  <script src="pages/remote.js"></script>
+  <script type="module" src="scene3d.js"></script>
 </body>
 </html>
